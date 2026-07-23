@@ -1,0 +1,219 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ========== 用户订阅 ==========
+
+model User {
+  id                   String  @id // Supabase Auth UUID
+  subscription         String  @default("FREE") // FREE | PRO
+  monthlyCredits       Int              @default(3)
+  creditsUsed          Int              @default(0)
+  creditResetAt        DateTime         @default(now())
+  subscriptionExpiresAt DateTime?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  usageLogs UsageLog[]
+  orders    Order[]
+}
+
+model Order {
+  id            String   @id @default(cuid())
+  userId        String
+  package       String
+  credits       Int
+  amount        String
+  status        String   @default("pending") // pending/confirmed/rejected
+  paymentMethod String?
+  userEmail     String?
+  createdAt     DateTime @default(now())
+  confirmedAt   DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UsageLog {
+  id        String   @id @default(cuid())
+  userId    String
+  action    String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+// ========== 项目 ==========
+model Project {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String
+  description String?
+  coverStyle  String?                    // 画风：古风/现代/二次元/热血
+  stylePrompt String? @default("电影级光影，写实风格，4K超高清") // 统一出图风格提示词
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  outline     Outline?
+  episodes    Episode[]
+  characters  Character[]
+  scenes      Scene[]
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+// ========== AI 大纲 ==========
+model Outline {
+  id           String   @id @default(cuid())
+  projectId    String   @unique
+  episodeCount Int
+  sourceText   String?                    // 原始故事输入
+  content      String                     // JSON [{number,title,synopsis}]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+// ========== 剧集 ==========
+model Episode {
+  id        String   @id @default(cuid())
+  projectId String
+  number    Int
+  title     String
+  synopsis  String?                      // 来自大纲的概要
+  script        String?                      // 完整剧本文本（含标签格式）
+  novelContent  String?                      // 原始小说文本
+  scriptContent String?                      // 结构化脚本（标签格式）
+  status        String   @default("pending") // pending/scripting/storyboard/doing/done
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  shots   Shot[]
+
+  @@unique([projectId, number])
+  @@index([projectId])
+}
+
+// ========== 分镜 ==========
+model Shot {
+  id          String   @id @default(cuid())
+  episodeId   String
+  number      String
+  shotType    String?                    // 特写/近景/中景/全景/远景
+  duration    Int?    @default(4)
+  description String?                    // 画面描述
+  dialogue    String?                    // 台词
+  soundFx     String?                    // 音效
+  imageUrl    String?                    // Supabase Storage URL
+  status      String   @default("pending") // pending/prompting/imaged/qcing/passed
+  styleId     String?
+  sceneId     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  episode        Episode         @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  style          StyleTemplate?  @relation(fields: [styleId], references: [id])
+  scene          Scene?          @relation(fields: [sceneId], references: [id])
+  characters     ShotCharacter[]
+  promptVersions PromptVersion[]
+
+  @@unique([episodeId, number])
+  @@index([episodeId])
+  @@index([styleId])
+  @@index([sceneId])
+}
+
+// ========== 角色 ==========
+model Character {
+  id           String   @id @default(cuid())
+  projectId    String
+  name         String
+  role         String?
+  faceDesc     String?
+  bodyType     String?
+  costumeJson  String?
+  anchorDayCn  String?
+  anchorDayEn  String?
+  anchorNiteCn String?
+  anchorNiteEn String?
+  imageUrl     String?                    // Supabase Storage URL
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  project   Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  shotLinks ShotCharacter[]
+
+  @@index([projectId])
+}
+
+// ========== 场景 ==========
+model Scene {
+  id               String   @id @default(cuid())
+  projectId        String
+  name             String
+  description      String?
+  anchorDayCn      String?
+  anchorDayEn      String?
+  anchorNiteCn     String?
+  anchorNiteEn     String?
+  colorPalette     String?
+  lighting         String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  shots   Shot[]
+
+  @@index([projectId])
+}
+
+// ========== 风格模板 ==========
+model StyleTemplate {
+  id               String   @id @default(cuid())
+  name             String
+  applicableScenes String?
+  anchorCn         String
+  anchorEn         String
+  qcChecklistJson  String?
+  isDayStyle       Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  shots Shot[]
+}
+
+// ========== 分镜-角色关联 ==========
+model ShotCharacter {
+  id          String @id @default(cuid())
+  shotId      String
+  characterId String
+
+  shot      Shot      @relation(fields: [shotId], references: [id], onDelete: Cascade)
+  character Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@unique([shotId, characterId])
+}
+
+// ========== Prompt版本 ==========
+model PromptVersion {
+  id            String   @id @default(cuid())
+  shotId        String
+  versionNumber Int
+  promptCn      String
+  promptEn      String
+  createdAt     DateTime @default(now())
+
+  shot Shot @relation(fields: [shotId], references: [id], onDelete: Cascade)
+
+  @@unique([shotId, versionNumber])
+  @@index([shotId])
+}
